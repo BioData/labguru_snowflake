@@ -17,7 +17,8 @@ SNOWFLAKE_WAREHOUSE = os.environ['SNOWFLAKE_WAREHOUSE']
 SNOWFLAKE_DATABASE = os.environ['SNOWFLAKE_DATABASE']
 SNOWFLAKE_SCHEMA = os.environ['SNOWFLAKE_SCHEMA']
 SNOWFLAKE_TABLE = os.environ['SNOWFLAKE_TABLE']
-
+SERVER= os.environ['LABGURU_SERVER']
+TOKEN= os.environ['LABGURU_TOKEN']
 app = Flask(__name__)
 
 
@@ -36,7 +37,7 @@ def receive_payload():
     for procedure in experiment_data.get('experiment_procedures', []):
         for element in procedure['experiment_procedure']['elements']:
             element_id = element['id']
-            element_api_url = f'https://my.labguru.com/api/v1/elements/{element_id}'
+            element_api_url = f'{SERVER}/api/v1/elements/{element_id}?token={TOKEN}'
             element_data = requests.get(element_api_url).json()
             element.update(element_data)
 
