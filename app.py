@@ -69,5 +69,6 @@ def upload_to_snowflake(file_name):
         with con.cursor(DictCursor) as cur:
             with open(file_name) as file:
                 json_data = file.read()
+                print(f"DATA: {json_data}") 
                 cur.execute(f"INSERT INTO {SNOWFLAKE_TABLE} (data) VALUES (PARSE_JSON(%s))", (json_data,))
                 con.commit()
