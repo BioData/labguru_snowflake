@@ -29,6 +29,7 @@ def hello_world():
 @app.route('/receive_payload', methods=['POST'])
 def receive_payload():
     payload = request.json
+    payload = payload[0] 
     print(f"Received payload: {payload}")  # Add this line to print the received payload
     api_url = payload['url']
     # Retrieve experiment data
