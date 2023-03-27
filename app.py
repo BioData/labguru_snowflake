@@ -34,7 +34,7 @@ def receive_payload():
     api_url = payload['url']
     # Retrieve experiment data
     
-    experiment_data = requests.get(f'{SERVER}{api_url}').json()
+    experiment_data = requests.get(f'{SERVER}{api_url}?token={TOKEN}').json()
 
     # Retrieve element data
     for procedure in experiment_data.get('experiment_procedures', []):
