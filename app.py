@@ -7,6 +7,10 @@ import csv
 from snowflake.connector import connect
 from snowflake.connector import DictCursor
 
+import snowflake.connector
+from snowflake.connector import connect
+
+
 from flask import request
 from flask import jsonify
 from flask import render_template
@@ -18,7 +22,9 @@ SNOWFLAKE_WAREHOUSE = os.environ['SNOWFLAKE_WAREHOUSE']
 SNOWFLAKE_DATABASE = os.environ['SNOWFLAKE_DATABASE']
 SNOWFLAKE_SCHEMA = os.environ['SNOWFLAKE_SCHEMA']
 SNOWFLAKE_TABLE = os.environ['SNOWFLAKE_TABLE']
-SNOWFLAKE_STAGE = 'lg_temp'
+SNOWFLAKE_STAGE = 'lg_temp_stage'
+SNOWFLAKE_TABLE = 'lg_plates_table'
+
 SERVER= os.environ['LABGURU_SERVER']
 TOKEN= os.environ['LABGURU_TOKEN']
 app = Flask(__name__)
@@ -37,15 +43,24 @@ def plate_upload():
     print(f"Received payload: {payload}")
     api_url = payload['url']
     plate_data = requests.get(f'{SERVER}{api_url}?token={TOKEN}').json()
-    file_name = plate_data["file_name"][1]
+    file_name = plate_data["attachment_file_name"]
+    print(file_name)
     if 'cell_growth_data_' in file_name:
-        raw_data = requests.get(f'{SERVER}{api_url}/download?token={TOKEN}').json()
-        path = save_csv_data_to_file(plate_data,file_name)
+        print('cell_growth_data found')
+        print(api_url)
+        print(f'{SERVER}{api_url}/download?token={TOKEN}')
+        raw_data = requests.get(f'{SERVER}{api_url}/download?token={TOKEN}')
+        print(f'raw data: {raw_data.content}')
+        path = save_csv_data_to_file(raw_data.content,file_name)
+        current_directory = os.getcwd()
+        full_path = os.path.join(current_directory, file_name)
+        print(full_path)
         ctx = get_ctx()
         labguru_plate_id = 3
-        upload_file_to_stage(ctx,SNOWFLAKE_STAGE,path)
+        upload_file_to_stage(ctx,SNOWFLAKE_STAGE,full_path)
         hour = int(file_name.split('_')[3])
-        load_csv_data_from_stage(ctx, SNOWFLAKE_STAGE, path, SNOWFLAKE_TABLE,hour, labguru_plate_id, "HeLa", "Trg108" )
+        load_csv_data_from_stage(ctx, SNOWFLAKE_STAGE, full_path, SNOWFLAKE_TABLE,hour, labguru_plate_id, "HeLa", "Trg108" )
+    return {'status': 'success'}
 
 @app.route('/receive_payload', methods=['POST'])
 def receive_payload():
@@ -78,16 +93,14 @@ def receive_payload():
 
     return {'status': 'success'}
 
-def save_csv_data_to_file(plate_data, file_name):
-    with open(file_name, 'w', newline='') as csvfile:
-        fieldnames = plate_data[0].keys()
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+def save_csv_data_to_file(csv_content, file_name):
+    with open(file_name, 'wb') as csvfile:
+        csvfile.write(csv_content)
 
-        writer.writeheader()
-        for row in plate_data:
-            writer.writerow(row)
 
 def upload_file_to_stage(ctx,stage_name, file_path):
+  print(stage_name)
+  print(file_path)
   with ctx.cursor() as cur:
     cur.execute(f"PUT file://{file_path} @{stage_name}")
 
@@ -121,7 +134,7 @@ def load_csv_data_from_stage(ctx, stage_name, file_path, table_name, hour, lg_pl
         cursor.execute(sql)
     
         update_table(cursor, table_name, "labguru_plate_id", lg_plate_id)
-        update_table(cursor, table_name, "hour", hour)
+        update_table(cursor, table_name, "sample_hour", hour)
         update_table(cursor, table_name, "drug_candidate", f"'{target}'")
         update_table(cursor, table_name, "cell_line", f"'{cell}'")
 
@@ -133,22 +146,27 @@ def load_csv_data_from_stage(ctx, stage_name, file_path, table_name, hour, lg_pl
         raise e
 
 def get_ctx():
-    snowflake.connector.connect(
+    conn = snowflake.connector.connect(
     user=SNOWFLAKE_USER,
     password=SNOWFLAKE_PASSWORD,
     account=SNOWFLAKE_ACCOUNT)
+    conn.cursor().execute(f"CREATE WAREHOUSE IF NOT EXISTS {SNOWFLAKE_WAREHOUSE}")
+    conn.cursor().execute(f"USE WAREHOUSE {SNOWFLAKE_WAREHOUSE}")
+    conn.cursor().execute(f"CREATE DATABASE IF NOT EXISTS {SNOWFLAKE_DATABASE} ")
+    conn.cursor().execute(f"USE DATABASE {SNOWFLAKE_DATABASE}")
+    conn.cursor().execute(f"CREATE SCHEMA IF NOT EXISTS {SNOWFLAKE_SCHEMA}")
+    conn.cursor().execute(f"USE SCHEMA {SNOWFLAKE_SCHEMA}")
+    conn.cursor().execute(f"CREATE TEMPORARY STAGE {SNOWFLAKE_STAGE}")
+    conn.cursor().execute(
+        f"CREATE TABLE IF NOT EXISTS {SNOWFLAKE_TABLE}(labguru_plate_id string, cell_line string, drug_candidate string, well string, concentration number(10,3), readout number, sample_hour number)")
+
+    return conn
+
 
 def upload_to_snowflake(file_name):
     ctx = get_ctx()
     cs = ctx.cursor()
     try:
-        cs.execute(f"CREATE WAREHOUSE IF NOT EXISTS {SNOWFLAKE_WAREHOUSE}")
-        cs.execute(f"USE WAREHOUSE {SNOWFLAKE_WAREHOUSE}")
-        cs.execute(f"CREATE DATABASE IF NOT EXISTS {SNOWFLAKE_DATABASE} ")
-        cs.execute(f"USE DATABASE {SNOWFLAKE_DATABASE}")
-        cs.execute(f"CREATE SCHEMA IF NOT EXISTS {SNOWFLAKE_SCHEMA}")
-        cs.execute(f"USE SCHEMA {SNOWFLAKE_SCHEMA}")
-        cs.execute(f"CREATE TEMPORARY STAGE {SNOWFLAKE_STAGE}")
         cs.execute(
             f"CREATE OR REPLACE TABLE {SNOWFLAKE_TABLE}(id integer, name string, start_date datetime, end_date datetime, data string)")
         file_name = './experiment.json'
