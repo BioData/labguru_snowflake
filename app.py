@@ -37,7 +37,7 @@ def plate_upload():
     print(f"Received payload: {payload}")
     api_url = payload['url']
     plate_data = requests.get(f'{SERVER}{api_url}?token={TOKEN}').json()
-    file_name = plate_data["attachment_file_name"]
+    file_name = plate_data["attachment_file_name"][1]
     if 'cell_growth_data_' in file_name:
         raw_data = requests.get(f'{SERVER}{api_url}/download?token={TOKEN}').json()
         path = save_csv_data_to_file(plate_data,file_name)
