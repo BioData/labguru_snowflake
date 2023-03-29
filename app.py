@@ -31,7 +31,7 @@ def hello_world():
 #to register this webhook use the following url
 # 
 @app.route("/plates")
-def plate_upload(methods=['POST'])
+def plate_upload(methods=['POST']):
     payload = request.json
     payload = payload[0] 
     print(f"Received payload: {payload}")
