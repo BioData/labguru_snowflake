@@ -3,6 +3,7 @@ from flask import Flask
 import os
 import json
 import requests
+import csv 
 from snowflake.connector import connect
 from snowflake.connector import DictCursor
 
@@ -26,6 +27,25 @@ app = Flask(__name__)
 @app.route("/")
 def hello_world():
     return render_template("index.html")
+
+#to register this webhook use the following url
+# 
+@app.route("/plates")
+def plate_upload(methods=['POST'])
+    payload = request.json
+    payload = payload[0] 
+    print(f"Received payload: {payload}")
+    api_url = payload['url']
+    plate_data = requests.get(f'{SERVER}{api_url}?token={TOKEN}').json()
+    file_name = plate_data["attachment_file_name"]
+    if 'cell_growth_data_' in file_name:
+        raw_data = requests.get(f'{SERVER}{api_url}/download?token={TOKEN}').json()
+        path = save_csv_data_to_file(plate_data,file_name)
+        ctx = get_ctx()
+        labguru_plate_id = 3
+        upload_file_to_stage(ctx,SNOWFLAKE_STAGE,path)
+        hour = int(file_name.split('_')[3])
+        load_csv_data_from_stage(ctx, SNOWFLAKE_STAGE, path, SNOWFLAKE_TABLE,hour, labguru_plate_id, "HeLa", "Trg108" )
 
 @app.route('/receive_payload', methods=['POST'])
 def receive_payload():
@@ -58,6 +78,15 @@ def receive_payload():
 
     return {'status': 'success'}
 
+def save_csv_data_to_file(plate_data, file_name):
+    with open(file_name, 'w', newline='') as csvfile:
+        fieldnames = plate_data[0].keys()
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+        writer.writeheader()
+        for row in plate_data:
+            writer.writerow(row)
+
 def upload_file_to_stage(ctx,stage_name, file_path):
   with ctx.cursor() as cur:
     cur.execute(f"PUT file://{file_path} @{stage_name}")
@@ -70,12 +99,47 @@ def load_json_data_from_stage(ctx, stage_name, table_name):
             FILE_FORMAT = (TYPE = 'JSON')
         """)
 
-def upload_to_snowflake(file_name):
-    ctx = snowflake.connector.connect(
+def update_table(cursor, table_name, column, value):
+    update_sql = f"""
+        UPDATE {table_name}
+        SET {column} = {value}
+        WHERE {column} IS NULL;
+    """
+    cursor.execute(update_sql)
+
+def load_csv_data_from_stage(ctx, stage_name, file_path, table_name, hour, lg_plate_id, cell, target):
+    cursor = ctx.cursor()
+    try:
+        # Build the SQL query to load the data from the stage into the table
+        sql = f"""
+            COPY INTO {table_name}
+            FROM (SELECT null , null, null, $1, $2, $3 , null FROM '@{stage_name}/{os.path.basename(file_path)}')
+            FILE_FORMAT = (TYPE = 'CSV', FIELD_DELIMITER = ',', SKIP_HEADER = 1);
+        """
+        
+        # Execute the SQL query
+        cursor.execute(sql)
+    
+        update_table(cursor, table_name, "labguru_plate_id", lg_plate_id)
+        update_table(cursor, table_name, "hour", hour)
+        update_table(cursor, table_name, "drug_candidate", f"'{target}'")
+        update_table(cursor, table_name, "cell_line", f"'{cell}'")
+
+        
+        cursor.close()
+    except Exception as e:
+        print(f"Error loading data from stage to table: {e}")
+        cursor.close()
+        raise e
+
+def get_ctx():
+    snowflake.connector.connect(
     user=SNOWFLAKE_USER,
     password=SNOWFLAKE_PASSWORD,
-    account=SNOWFLAKE_ACCOUNT
-    )
+    account=SNOWFLAKE_ACCOUNT)
+
+def upload_to_snowflake(file_name):
+    ctx = get_ctx()
     cs = ctx.cursor()
     try:
         cs.execute(f"CREATE WAREHOUSE IF NOT EXISTS {SNOWFLAKE_WAREHOUSE}")
