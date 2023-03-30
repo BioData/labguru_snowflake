@@ -23,7 +23,7 @@ SNOWFLAKE_DATABASE = os.environ['SNOWFLAKE_DATABASE']
 SNOWFLAKE_SCHEMA = os.environ['SNOWFLAKE_SCHEMA']
 SNOWFLAKE_TABLE = os.environ['SNOWFLAKE_TABLE']
 SNOWFLAKE_STAGE = 'lg_temp_stage'
-SNOWFLAKE_TABLE = 'lg_plates_table'
+SNOWFLAKE_PLATE_TABLE = 'lg_plates_table'
 
 SERVER= os.environ['LABGURU_SERVER']
 TOKEN= os.environ['LABGURU_TOKEN']
@@ -56,10 +56,12 @@ def plate_upload():
         full_path = os.path.join(current_directory, file_name)
         print(full_path)
         ctx = get_ctx()
+        ctx.cursor().execute(
+            f"CREATE TABLE IF NOT EXISTS {SNOWFLAKE_PLATE_TABLE}(labguru_plate_id string, cell_line string, drug_candidate string, well string, concentration number(10,3), readout number, sample_hour number)")
         labguru_plate_id = 3
         upload_file_to_stage(ctx,SNOWFLAKE_STAGE,full_path)
         hour = int(file_name.split('_')[3])
-        load_csv_data_from_stage(ctx, SNOWFLAKE_STAGE, full_path, SNOWFLAKE_TABLE,hour, labguru_plate_id, "HeLa", "Trg108" )
+        load_csv_data_from_stage(ctx, SNOWFLAKE_STAGE, full_path, SNOWFLAKE_PLATE_TABLE,hour, labguru_plate_id, "HeLa", "Trg108" )
     return {'status': 'success'}
 
 @app.route('/receive_payload', methods=['POST'])
@@ -157,9 +159,6 @@ def get_ctx():
     conn.cursor().execute(f"CREATE SCHEMA IF NOT EXISTS {SNOWFLAKE_SCHEMA}")
     conn.cursor().execute(f"USE SCHEMA {SNOWFLAKE_SCHEMA}")
     conn.cursor().execute(f"CREATE TEMPORARY STAGE {SNOWFLAKE_STAGE}")
-    conn.cursor().execute(
-        f"CREATE TABLE IF NOT EXISTS {SNOWFLAKE_TABLE}(labguru_plate_id string, cell_line string, drug_candidate string, well string, concentration number(10,3), readout number, sample_hour number)")
-
     return conn
 
 
@@ -168,7 +167,7 @@ def upload_to_snowflake(file_name):
     cs = ctx.cursor()
     try:
         cs.execute(
-            f"CREATE OR REPLACE TABLE {SNOWFLAKE_TABLE}(id integer, name string, start_date datetime, end_date datetime, data string)")
+            f"CREATE TABLE IF NOT EXISTS {SNOWFLAKE_TABLE}(id integer, name string, start_date datetime, end_date datetime, data string)")
         file_name = './experiment.json'
         upload_file_to_stage(ctx,SNOWFLAKE_STAGE,file_name)
         load_json_data_from_stage(ctx, SNOWFLAKE_STAGE, SNOWFLAKE_TABLE)
